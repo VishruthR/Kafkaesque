@@ -1,7 +1,17 @@
 package main
 
-import "fmt"
+import (
+	"os"
+	"fmt"
+	"github.com/VishruthR/Kafkaesque/pkg/broker"
+)
 
 func main () {
-	fmt.Println("Hello, world")
+	args := os.Args
+	if len(args) != 2 {
+		fmt.Printf("Invalid arguments\nUsage:\t<command> <port>\n")
+		return
+	}
+
+	broker.Listen(args[1])
 }
