@@ -1,8 +1,7 @@
 <header>
-PUSH
+PULL
 test_topic
 100
 </header>
 <body>
-helooooo
 </body>

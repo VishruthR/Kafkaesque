@@ -8,73 +8,20 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/phf/go-queue/queue"
 )
 
-const (
-	HEADER_START          = "<header>\n"
-	HEADER_END            = "</header>\n"
-	BODY_START            = "<body>\n"
-	BODY_END              = "</body>"
-	PULL_REQUEST_PROTOCOL = "PULL"
-	PUSH_REQUEST_PROTOCOL = "PUSH"
-)
-
-// De facto enum
-type RequestType int
-
-const (
-	PULL RequestType = iota
-	PULL_N
-	PULL_HEAD
-	PUSH
-	PUSH_N
-)
-
-func (r RequestType) String() string {
-	switch r {
-	case PULL:
-		return "PULL"
-	case PULL_N:
-		return "PULL_N"
-	case PULL_HEAD:
-		return "PULL_HEAD"
-	case PUSH:
-		return "PUSH"
-	case PUSH_N:
-		return "PUSH_N"
-	default:
-		panic("Invalid Request")
-	}
-}
-
-func stringToRequestType(s string) RequestType {
-	switch s {
-	case "PULL":
-		return PULL
-	case "PULL_N":
-		return PULL_N
-	case "PULL_HEAD":
-		return PULL_HEAD
-	case "PUSH":
-		return PUSH
-	case "PUSH_N":
-		return PUSH_N
-	default:
-		panic("Invalid request string")
-	}
-}
-
-type requestHeader struct {
-	request       RequestType
-	topic         string
-	contentLength uint64
-}
-
-func (rH requestHeader) String() string {
-	return fmt.Sprintf("{\n\trequest: %v,\n\ttopic: %v,\n\tcontentLength: %v\n}", rH.request, rH.topic, rH.contentLength)
+type brokerQueue struct {
+	q  *queue.Queue
+	mu sync.Mutex
 }
 
 func Listen(port string) {
+	broker := brokerQueue{
+		q: queue.New(),
+	}
 	listener, err := net.Listen("tcp4", ":"+port)
 	if err != nil {
 		log.Fatal(err)
@@ -88,15 +35,15 @@ func Listen(port string) {
 			fmt.Println(err) // TODO: Better error handling; ideally a failed connection attempt should not crash the broker
 			return
 		}
-		go handleConnection(conn)
+		go handleConnection(conn, &broker)
 	}
 }
 
-func processPacket(readBuf []byte, writeBuf *[]byte) {
+func processPacket(readBuf []byte, writeBuf *[]byte) (*request, error) {
 	// fmt.Println(string(readBuf))
 	messageParts := strings.Split(string(readBuf), HEADER_END)
 	if len(messageParts) != 2 {
-		panic("Invalid message structure; Check if only header and body are presents")
+		panic("Invalid message structure; Check if only header and body are presents") // TODO: processPacket should return error here instead of panicking
 	}
 
 	header := messageParts[0]
@@ -106,8 +53,10 @@ func processPacket(readBuf []byte, writeBuf *[]byte) {
 		panic("Invalid message structure; Ensure header has both opening and closing tag")
 	}
 	body := messageParts[1]
-	body, exists = strings.CutPrefix(body, BODY_START)
-	if !exists {
+	fmt.Printf("%s\n", body)
+	body, existsPre := strings.CutPrefix(body, BODY_START)
+	body, existsSuf := strings.CutSuffix(body, BODY_END)
+	if !(existsPre && existsSuf) {
 		panic("Invalid message structure; Ensure body has both opening and closing tag")
 	}
 
@@ -120,28 +69,30 @@ func processPacket(readBuf []byte, writeBuf *[]byte) {
 		panic("Invalid content length")
 	}
 
-	requestHeader := requestHeader{
-		stringToRequestType(headerParts[0]),
-		headerParts[1],
-		contentLen,
+	request := request{
+		requestHeader{
+			stringToRequestType(headerParts[0]),
+			headerParts[1],
+			contentLen,
+		},
+		body, // copying whole string here could be a little slow
 	}
-	fmt.Println(requestHeader)
 
-	(*writeBuf) = append((*writeBuf), body...)
+	return &request, nil
 }
 
 func isFullPacket(packet []byte) bool {
 	return bytes.Contains(packet, []byte(BODY_END)) // TODO: Make this more efficient/comprehensive
 }
 
-func handleConnection(conn net.Conn) {
+func handleConnection(conn net.Conn, broker *brokerQueue) {
 	defer conn.Close()
 	defer recoverFromParsingError(conn)
 	writeBuf := make([]byte, 4096)
 	readBuf := make([]byte, 0, 4096)
 	for {
 		temp := make([]byte, 4096)
-		_, err := conn.Read(temp)
+		bytesRead, err := conn.Read(temp)
 		if err != nil {
 			if err != io.EOF {
 				fmt.Printf("Connection %s read error: %v\n", conn.RemoteAddr().String(), err) // TODO: Better error handling
@@ -149,14 +100,27 @@ func handleConnection(conn net.Conn) {
 			break
 		}
 
+		finalLen := len(readBuf) + bytesRead
 		readBuf = append(readBuf, temp...)
+		readBuf = readBuf[:finalLen]
 		if isFullPacket(readBuf) {
-			processPacket(readBuf, &writeBuf)
-			conn.Write(writeBuf)
+			request, err := processPacket(readBuf, &writeBuf)
+			if err != nil {
+				panic("Error processing packet") // TOOD: Fix error handling of processPacket
+			}
+			fmt.Printf("%v\n", request)
+
+			response, err := request.processRequest(broker)
+			if err != nil {
+				panic("Error processing request!")
+			}
+
+			writeBuf = append(writeBuf, response.getResponse()...)
 			break
 		}
 
 	}
+
 	conn.Write(writeBuf)
 }
 
