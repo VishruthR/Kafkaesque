@@ -5,6 +5,7 @@ Toy publisher client for testing purposes
 */
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
@@ -15,14 +16,15 @@ const TYPE = "tcp" // broker only supports tcp for now
 
 func main() {
 	args := os.Args
-	if len(args) != 4 {
-		fmt.Printf("Invalid argumens\nUsage:\t<command> <host> <port> <payload>\n")
+	if len(args) != 3 {
+		fmt.Printf("Invalid argumens\nUsage:\t<command> <host> <port>\n")
 		return
 	}
 
 	host := args[1]
 	port := args[2]
-	payload := args[3]
+
+	reader := bufio.NewReader(os.Stdin)
 
 	tcpServer, err := net.ResolveTCPAddr(TYPE, host+":"+port)
 	if err != nil {
@@ -37,12 +39,25 @@ func main() {
 	}
 	defer conn.Close()
 
-	_, err = conn.Write([]byte(payload))
-	if err != nil {
-		fmt.Println("Write failed:", err)
-		return
+	buf := make([]byte, 4096)
+	for {
+		numBytes, err := reader.Read(buf[:cap(buf)])
+		buf = buf[:numBytes] // Select only newly read bytes
+		if numBytes == 0 {
+			if err == nil {
+				continue
+			} else if err == io.EOF {
+				break
+			}
+			panic("Error reading STDIN")
+		}
+
+		_, err = conn.Write(buf)
+		if err != nil {
+			panic("Write to sock failed")
+		}
+		conn.CloseWrite()
 	}
-	conn.CloseWrite()
 
 	received := make([]byte, 4096)
 	for {
