@@ -1,6 +1,9 @@
 package broker
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 type response interface {
 	getResponse() []byte
@@ -38,7 +41,7 @@ type pullResponse struct {
 
 func (r pullResponse) getResponse() []byte {
 	if !r.status {
-		return []byte("Push failed")
+		return []byte("Pull failed")
 	}
 
 	if r.empty {
@@ -46,4 +49,22 @@ func (r pullResponse) getResponse() []byte {
 	}
 
 	return []byte(fmt.Sprintf("%s\v", r.body))
+}
+
+type pullNResponse struct {
+	status    bool
+	numPulled uint64
+	body      []string
+}
+
+func (r pullNResponse) getResponse() []byte {
+	if !r.status {
+		return []byte("Pull failed")
+	}
+
+	if r.numPulled == 0 {
+		return []byte("Queue empty")
+	}
+
+	return []byte(fmt.Sprintf("%v;%v", r.numPulled, strings.Join(r.body, ";")))
 }

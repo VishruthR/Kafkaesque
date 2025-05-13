@@ -64,7 +64,8 @@ func processPacket(readBuf []byte, writeBuf *[]byte) (*request, error) {
 	if len(headerParts) != 3 {
 		panic("Invalid header format")
 	}
-	contentLen, err := strconv.ParseUint(headerParts[2][:len(headerParts[2])-1], 10, 64)
+	headerParts[2] = strings.TrimSpace(headerParts[2])
+	contentLen, err := strconv.ParseUint(headerParts[2], 10, 64)
 	if err != nil {
 		panic("Invalid content length")
 	}
@@ -112,6 +113,7 @@ func handleConnection(conn net.Conn, broker *brokerQueue) {
 
 			response, err := request.processRequest(broker)
 			if err != nil {
+				fmt.Println(err.Error())
 				panic("Error processing request!")
 			}
 

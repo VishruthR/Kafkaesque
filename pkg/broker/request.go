@@ -2,6 +2,7 @@ package broker
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -83,9 +84,9 @@ func (request request) processRequest(broker *brokerQueue) (response, error) {
 	case PULL:
 		return request.processPull(broker)
 	case PULL_N:
-		fmt.Println("Handling PULL_N")
+		return request.processPullN(broker)
 	case PULL_HEAD:
-		fmt.Println("Handling PULL_HEAD")
+		return request.processPullHead(broker)
 	case PUSH:
 		return request.processPush(broker)
 	case PUSH_N:
@@ -93,8 +94,6 @@ func (request request) processRequest(broker *brokerQueue) (response, error) {
 	default:
 		panic("Invalid request in requestHeader") // Panic because this should never happen
 	}
-
-	return pushResponse{status: false}, nil
 }
 
 func (request request) processPush(broker *brokerQueue) (pushResponse, error) {
@@ -133,7 +132,7 @@ func (request request) processPull(broker *brokerQueue) (pullResponse, error) {
 		fmt.Println("Cannot convert item from queue to string")
 		return pullResponse{
 			status: false,
-		}, nil // Should throw an actual error here
+		}, &InvalidElementInQueue{item: item}
 	}
 
 	return pullResponse{
@@ -141,4 +140,73 @@ func (request request) processPull(broker *brokerQueue) (pullResponse, error) {
 		empty:  false,
 		body:   item_str,
 	}, nil
+}
+
+func (request request) processPullN(broker *brokerQueue) (pullNResponse, error) {
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	request.body = strings.TrimSpace(request.body)
+	numToPull, err := strconv.ParseUint(request.body, 10, 64)
+	if err != nil {
+		return pullNResponse{
+			status: false,
+		}, err
+	}
+
+	response := pullNResponse{
+		body:      make([]string, 0, 64), // Initialize with some base capacity to avoid unecessary resizing
+		numPulled: 0,
+	}
+
+	for response.numPulled < numToPull {
+		item := broker.q.PopFront()
+		if item == nil { // Reached end of queue
+			break
+		}
+
+		item_str, ok := item.(string)
+		if !ok {
+			fmt.Println("Cannot convert item from queue to string")
+			response.status = true // Not sure if I should return error or return the elements that we fetched
+			return response, &InvalidElementInQueue{item: item}
+		}
+
+		response.body = append(response.body, item_str)
+		response.numPulled += 1
+	}
+
+	response.status = true
+	return response, nil
+}
+
+// This function lwk identical to pull N right now, but will keep separate for now in case of changes to API
+func (request request) processPullHead(broker *brokerQueue) (pullNResponse, error) {
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
+
+	response := pullNResponse{
+		body:      make([]string, 0, 64), // Initialize with some base capacity to avoid unecessary resizing
+		numPulled: 0,
+	}
+
+	for {
+		item := broker.q.PopFront()
+		if item == nil { // Reached end of queue
+			break
+		}
+
+		item_str, ok := item.(string)
+		if !ok {
+			fmt.Println("Cannot convert item from queue to string")
+			response.status = true // Not sure if I should return error or return the elements that we fetched
+			return response, &InvalidElementInQueue{item: item}
+		}
+
+		response.body = append(response.body, item_str)
+		response.numPulled += 1
+	}
+
+	response.status = true
+	return response, nil
 }
