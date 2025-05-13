@@ -9,6 +9,14 @@ type response interface {
 	getResponse() []byte
 }
 
+type invalidTopicResponse struct {
+	topic string
+}
+
+func (r invalidTopicResponse) getResponse() []byte {
+	return []byte(fmt.Sprintf("Invalid topic: %v\n", r.topic))
+}
+
 type pushResponse struct {
 	status bool
 }
@@ -67,4 +75,16 @@ func (r pullNResponse) getResponse() []byte {
 	}
 
 	return []byte(fmt.Sprintf("%v;%v", r.numPulled, strings.Join(r.body, ";")))
+}
+
+type createTopicResponse struct {
+	status bool
+	topic  string
+}
+
+func (r createTopicResponse) getResponse() []byte {
+	if !r.status {
+		return []byte(fmt.Sprintf("Error creating topic %s", r.topic))
+	}
+	return []byte(fmt.Sprintf("Topic %s succesfully created", r.topic))
 }

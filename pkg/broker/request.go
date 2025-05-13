@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/phf/go-queue/queue"
 )
 
 const (
-	HEADER_START          = "<header>\n"
-	HEADER_END            = "</header>\n"
-	BODY_START            = "<body>\n"
-	BODY_END              = "</body>"
-	PULL_REQUEST_PROTOCOL = "PULL"
-	PUSH_REQUEST_PROTOCOL = "PUSH"
+	HEADER_START = "<header>\n"
+	HEADER_END   = "</header>\n"
+	BODY_START   = "<body>\n"
+	BODY_END     = "</body>"
 )
 
 // De facto enum
@@ -24,6 +24,7 @@ const (
 	PULL_HEAD
 	PUSH
 	PUSH_N
+	CREATE_TOPIC
 )
 
 func (r RequestType) String() string {
@@ -38,6 +39,8 @@ func (r RequestType) String() string {
 		return "PUSH"
 	case PUSH_N:
 		return "PUSH_N"
+	case CREATE_TOPIC:
+		return "CREATE_TOPIC"
 	default:
 		panic("Invalid Request")
 	}
@@ -55,6 +58,8 @@ func stringToRequestType(s string) RequestType {
 		return PUSH
 	case "PUSH_N":
 		return PUSH_N
+	case "CREATE_TOPIC":
+		return CREATE_TOPIC
 	default:
 		panic("Invalid request string")
 	}
@@ -79,7 +84,19 @@ func (r request) String() string {
 	return fmt.Sprintf("{\n\theader: %v,\n\tbody: %v\n}", r.header, r.body)
 }
 
-func (request request) processRequest(broker *brokerQueue) (response, error) {
+func (request *request) processRequest(topics *topics) (response, error) {
+	switch request.header.request { // Handle non-topic specific requests
+	case CREATE_TOPIC:
+		return request.processCreateTopic(topics)
+	}
+
+	broker, exists := (*topics)[request.header.topic]
+	if !exists {
+		return invalidTopicResponse{
+			topic: request.header.topic,
+		}, &InvalidTopic{topic: request.header.topic}
+	}
+
 	switch request.header.request {
 	case PULL:
 		return request.processPull(broker)
@@ -96,7 +113,7 @@ func (request request) processRequest(broker *brokerQueue) (response, error) {
 	}
 }
 
-func (request request) processPush(broker *brokerQueue) (pushResponse, error) {
+func (request *request) processPush(broker *brokerQueue) (pushResponse, error) {
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
 	broker.q.PushBack(request.body)
@@ -104,7 +121,7 @@ func (request request) processPush(broker *brokerQueue) (pushResponse, error) {
 	return pushResponse{status: true}, nil
 }
 
-func (request request) processPushN(broker *brokerQueue) (pushNResponse, error) {
+func (request *request) processPushN(broker *brokerQueue) (pushNResponse, error) {
 	items := strings.Split(request.body, ";")
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
@@ -115,7 +132,7 @@ func (request request) processPushN(broker *brokerQueue) (pushNResponse, error) 
 	return pushNResponse{status: true, numPushed: len(items)}, nil
 }
 
-func (request request) processPull(broker *brokerQueue) (pullResponse, error) {
+func (request *request) processPull(broker *brokerQueue) (pullResponse, error) {
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
 
@@ -142,7 +159,7 @@ func (request request) processPull(broker *brokerQueue) (pullResponse, error) {
 	}, nil
 }
 
-func (request request) processPullN(broker *brokerQueue) (pullNResponse, error) {
+func (request *request) processPullN(broker *brokerQueue) (pullNResponse, error) {
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
 
@@ -181,7 +198,7 @@ func (request request) processPullN(broker *brokerQueue) (pullNResponse, error) 
 }
 
 // This function lwk identical to pull N right now, but will keep separate for now in case of changes to API
-func (request request) processPullHead(broker *brokerQueue) (pullNResponse, error) {
+func (request *request) processPullHead(broker *brokerQueue) (pullNResponse, error) {
 	broker.mu.Lock()
 	defer broker.mu.Unlock()
 
@@ -209,4 +226,21 @@ func (request request) processPullHead(broker *brokerQueue) (pullNResponse, erro
 
 	response.status = true
 	return response, nil
+}
+
+func (request request) processCreateTopic(topics *topics) (createTopicResponse, error) {
+	if _, exists := (*topics)[request.header.topic]; exists {
+		return createTopicResponse{
+			status: false, topic: request.header.topic,
+		}, &TopicAlreadyExists{topic: request.header.topic}
+	}
+
+	newBroker := brokerQueue{
+		q: queue.New(),
+	}
+	(*topics)[request.header.topic] = &newBroker
+
+	return createTopicResponse{
+		status: true, topic: request.header.topic,
+	}, nil
 }

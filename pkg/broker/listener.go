@@ -18,10 +18,10 @@ type brokerQueue struct {
 	mu sync.Mutex
 }
 
+type topics map[string]*brokerQueue
+
 func Listen(port string) {
-	broker := brokerQueue{
-		q: queue.New(),
-	}
+	topics := make(topics)
 	listener, err := net.Listen("tcp4", ":"+port)
 	if err != nil {
 		log.Fatal(err)
@@ -35,7 +35,7 @@ func Listen(port string) {
 			fmt.Println(err) // TODO: Better error handling; ideally a failed connection attempt should not crash the broker
 			return
 		}
-		go handleConnection(conn, &broker)
+		go handleConnection(conn, &topics)
 	}
 }
 
@@ -86,7 +86,7 @@ func isFullPacket(packet []byte) bool {
 	return bytes.Contains(packet, []byte(BODY_END)) // TODO: Make this more efficient/comprehensive
 }
 
-func handleConnection(conn net.Conn, broker *brokerQueue) {
+func handleConnection(conn net.Conn, topics *topics) {
 	defer conn.Close()
 	defer recoverFromParsingError(conn)
 	writeBuf := make([]byte, 4096)
@@ -111,7 +111,7 @@ func handleConnection(conn net.Conn, broker *brokerQueue) {
 			}
 			fmt.Printf("%v\n", request)
 
-			response, err := request.processRequest(broker)
+			response, err := request.processRequest(topics)
 			if err != nil {
 				fmt.Println(err.Error())
 				panic("Error processing request!")
