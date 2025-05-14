@@ -1,6 +1,6 @@
 <header>
 PULL_HEAD
-test_topic3
+test_topic
 100
 </header>
 <body>

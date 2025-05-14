@@ -15,13 +15,15 @@ PUSH/PULL
 </body>
 ```
 
+Next up: Scan through TODOs here and throughout codebase and clean up!
+
 TODO:
 
 - Make message more compact for perforamnce; decide if content length field in header is actually necessary
 - Implement processing multiple requests per connection (sticky connections)
 - Handle multiple connections/remember connection state
-- Support topic creation
 - Currently using untyped queue (gross); ideally create generic implementation urself using ring buffer idea
 - Support escaping `;` in PUSH_N body
 - Document response types
 - Write tests
+- Topic deletion?

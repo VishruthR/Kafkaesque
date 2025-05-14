@@ -32,47 +32,50 @@ func Listen(port string) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println(err) // TODO: Better error handling; ideally a failed connection attempt should not crash the broker
-			return
+			fmt.Printf("Error accepting connection: %v\n", err)
+			continue // Skip this connection
 		}
 		go handleConnection(conn, &topics)
 	}
 }
 
-func processPacket(readBuf []byte, writeBuf *[]byte) (*request, error) {
-	// fmt.Println(string(readBuf))
+func processPacket(readBuf []byte) (*request, error) {
 	messageParts := strings.Split(string(readBuf), HEADER_END)
 	if len(messageParts) != 2 {
-		panic("Invalid message structure; Check if only header and body are presents") // TODO: processPacket should return error here instead of panicking
+		return nil, &InvalidMessage{"Message must only contain header and body sections"}
 	}
 
 	header := messageParts[0]
 	header, exists := strings.CutPrefix(header, HEADER_START)
 	if !exists {
-		// While it isn't strictly necessary to panic, it is probably good to enforce strict schema
-		panic("Invalid message structure; Ensure header has both opening and closing tag")
+		return nil, &InvalidMessage{"Ensure header has both opening and closing tag"}
 	}
 	body := messageParts[1]
 	fmt.Printf("%s\n", body)
 	body, existsPre := strings.CutPrefix(body, BODY_START)
 	body, existsSuf := strings.CutSuffix(body, BODY_END)
 	if !(existsPre && existsSuf) {
-		panic("Invalid message structure; Ensure body has both opening and closing tag")
+		return nil, &InvalidMessage{"Ensure body has both opening and closing tag"}
 	}
 
 	headerParts := strings.SplitN(header, "\n", 3)
 	if len(headerParts) != 3 {
-		panic("Invalid header format")
+		return nil, &InvalidMessage{"Invalid header format"}
 	}
 	headerParts[2] = strings.TrimSpace(headerParts[2])
 	contentLen, err := strconv.ParseUint(headerParts[2], 10, 64)
 	if err != nil {
-		panic("Invalid content length")
+		return nil, &InvalidMessage{"Invalid content length"}
+	}
+
+	requestType, err := stringToRequestType(headerParts[0])
+	if err != nil {
+		return nil, err
 	}
 
 	request := request{
 		requestHeader{
-			stringToRequestType(headerParts[0]),
+			requestType,
 			headerParts[1],
 			contentLen,
 		},
@@ -88,7 +91,6 @@ func isFullPacket(packet []byte) bool {
 
 func handleConnection(conn net.Conn, topics *topics) {
 	defer conn.Close()
-	defer recoverFromParsingError(conn)
 	writeBuf := make([]byte, 4096)
 	readBuf := make([]byte, 0, 4096)
 	for {
@@ -96,7 +98,8 @@ func handleConnection(conn net.Conn, topics *topics) {
 		bytesRead, err := conn.Read(temp)
 		if err != nil {
 			if err != io.EOF {
-				fmt.Printf("Connection %s read error: %v\n", conn.RemoteAddr().String(), err) // TODO: Better error handling
+				handleConnectionError(conn, err)
+				return
 			}
 			break
 		}
@@ -105,16 +108,17 @@ func handleConnection(conn net.Conn, topics *topics) {
 		readBuf = append(readBuf, temp...)
 		readBuf = readBuf[:finalLen]
 		if isFullPacket(readBuf) {
-			request, err := processPacket(readBuf, &writeBuf)
+			request, err := processPacket(readBuf)
 			if err != nil {
-				panic("Error processing packet") // TOOD: Fix error handling of processPacket
+				handleConnectionError(conn, err)
+				return
 			}
 			fmt.Printf("%v\n", request)
 
 			response, err := request.processRequest(topics)
 			if err != nil {
-				fmt.Println(err.Error())
-				panic("Error processing request!")
+				handleConnectionError(conn, err)
+				return
 			}
 
 			writeBuf = append(writeBuf, response.getResponse()...)
@@ -126,9 +130,7 @@ func handleConnection(conn net.Conn, topics *topics) {
 	conn.Write(writeBuf)
 }
 
-func recoverFromParsingError(conn net.Conn) {
-	if r := recover(); r != nil {
-		fmt.Printf("Connection %s error: %v\n", conn.RemoteAddr().String(), r)
-		conn.Write([]byte(fmt.Sprintf("%v", r)))
-	}
+func handleConnectionError(conn net.Conn, e error) {
+	fmt.Printf("Connection %s error: %v\n", conn.RemoteAddr().String(), e)
+	conn.Write([]byte(fmt.Sprintf("%v", e)))
 }

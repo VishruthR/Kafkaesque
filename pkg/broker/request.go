@@ -46,22 +46,22 @@ func (r RequestType) String() string {
 	}
 }
 
-func stringToRequestType(s string) RequestType {
+func stringToRequestType(s string) (RequestType, error) {
 	switch s {
 	case "PULL":
-		return PULL
+		return PULL, nil
 	case "PULL_N":
-		return PULL_N
+		return PULL_N, nil
 	case "PULL_HEAD":
-		return PULL_HEAD
+		return PULL_HEAD, nil
 	case "PUSH":
-		return PUSH
+		return PUSH, nil
 	case "PUSH_N":
-		return PUSH_N
+		return PUSH_N, nil
 	case "CREATE_TOPIC":
-		return CREATE_TOPIC
+		return CREATE_TOPIC, nil
 	default:
-		panic("Invalid request string")
+		return PUSH, &InvalidRequestType{s} // Return a dummy value
 	}
 }
 
