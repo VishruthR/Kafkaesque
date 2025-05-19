@@ -1,0 +1,6 @@
+CREATE_TOPIC;test_topic;100 
+PUSH;test_topic;100 helooooo
+PUSH;test_topic;100 helooooo
+PULL;test_topic;100 
+PULL;test_topic;100 
+PULL;test_topic;100 

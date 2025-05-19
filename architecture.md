@@ -1,6 +1,10 @@
 # Broker
 
-Represents a single queue. You can only send one request per connection for now.
+The broker hosts all topics for a given partition. Publishers push messages to a topic and consumers pull messages from a topic.
+
+### Topics
+
+Each topic is essentially a queue of messages. Publishers publish to topics and consumers consume from topics. If a message is consumed from a topic, it is no longer available in that topic. All messages in a topic are durable.
 
 ### Message format
 
@@ -15,7 +19,7 @@ PUSH/PULL
 </body>
 ```
 
-Next up: Scan through TODOs here and throughout codebase and clean up!
+Next up: Make topics durable: Use WAL w/ checkpointing. Then write tests for current system
 
 TODO:
 
@@ -27,3 +31,7 @@ TODO:
 - Document response types
 - Write tests
 - Topic deletion?
+- Implement RAFT for consensus (consider minikube or alternatives, find a way to run distributed system experiments on your local machine; Might require getting a new computer)
+- Support for pushing to multiple topics at the same time (potentially wildcard matching topics?)
+
+RAFT: Fault-tolerance/availability + Partioning to distrbute load!

@@ -1,11 +1,13 @@
 package broker
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,8 +22,25 @@ type brokerQueue struct {
 
 type topics map[string]*brokerQueue
 
-func Listen(port string) {
+func Listen(port string, recover bool) {
 	topics := make(topics)
+
+	if recover {
+		err := RecoverFromLog(&topics)
+		if err != nil {
+			fmt.Println("Error recovering from log:", err)
+			return
+		}
+	}
+
+	walFile, err := os.OpenFile("wal.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		fmt.Println("Error opening WAL file: ", err)
+		return
+	}
+	defer walFile.Close()
+	walWriter := bufio.NewWriter(walFile)
+
 	listener, err := net.Listen("tcp4", ":"+port)
 	if err != nil {
 		log.Fatal(err)
@@ -35,7 +54,7 @@ func Listen(port string) {
 			fmt.Printf("Error accepting connection: %v\n", err)
 			continue // Skip this connection
 		}
-		go handleConnection(conn, &topics)
+		go handleConnection(conn, &topics, walWriter)
 	}
 }
 
@@ -51,7 +70,6 @@ func processPacket(readBuf []byte) (*request, error) {
 		return nil, &InvalidMessage{"Ensure header has both opening and closing tag"}
 	}
 	body := messageParts[1]
-	fmt.Printf("%s\n", body)
 	body, existsPre := strings.CutPrefix(body, BODY_START)
 	body, existsSuf := strings.CutSuffix(body, BODY_END)
 	if !(existsPre && existsSuf) {
@@ -89,7 +107,7 @@ func isFullPacket(packet []byte) bool {
 	return bytes.Contains(packet, []byte(BODY_END)) // TODO: Make this more efficient/comprehensive
 }
 
-func handleConnection(conn net.Conn, topics *topics) {
+func handleConnection(conn net.Conn, topics *topics, walWriter *bufio.Writer) {
 	defer conn.Close()
 	writeBuf := make([]byte, 4096)
 	readBuf := make([]byte, 0, 4096)
@@ -113,8 +131,15 @@ func handleConnection(conn net.Conn, topics *topics) {
 				handleConnectionError(conn, err)
 				return
 			}
-			fmt.Printf("%v\n", request)
+			// fmt.Printf("%v\n", request)
 
+			err = AppendLog(walWriter, request)
+			if err != nil {
+				// TODO: How to handle case where appending WAL works but processRequest doesn't?
+				// I think best solution is to fail-fast and force a crash so that recovery can begin
+				handleConnectionError(conn, err)
+				return
+			}
 			response, err := request.processRequest(topics)
 			if err != nil {
 				handleConnectionError(conn, err)
